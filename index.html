@@ -530,6 +530,45 @@ function sndWrong() {
   sub.stop(t + 0.5);
 }
 
+// Ascending pentatonic melody: game start
+function sndStartMelody(onDone) {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+  // A minor pentatonic ascending: A4 C5 D5 E5 G5 A5
+  const notes = [440, 523, 587, 659, 784, 880];
+  const spacing = 0.18;
+  const totalDuration = (notes.length - 1) * spacing + 0.7;
+
+  notes.forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+
+    const gain = ctx.createGain();
+    const onset = t + i * spacing;
+    // Each note slightly louder as melody rises
+    const vol = 0.05 + i * 0.012;
+    gain.gain.setValueAtTime(0, onset);
+    gain.gain.linearRampToValueAtTime(vol, onset + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, onset + 0.55);
+
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 1600 + i * 100;
+    filt.Q.value = 0.6;
+
+    osc.connect(filt);
+    filt.connect(gain);
+    gain.connect(ctx.destination);
+    createReverb(ctx, gain, 0.3, 0.1 + i * 0.01);
+
+    osc.start(onset);
+    osc.stop(onset + 0.6);
+  });
+
+  if (onDone) setTimeout(onDone, totalDuration * 1000);
+}
+
 // Descending wind-chime sequence: game over
 function sndGameOver() {
   const ctx = ensureAudio();
@@ -760,7 +799,7 @@ function startGame() {
   gameoverOvl.classList.remove('open');
   resetUI();
   updateStats();
-  showToken();
+  sndStartMelody(() => showToken());
 }
 
 function endGame() {
