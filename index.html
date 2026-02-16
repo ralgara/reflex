@@ -293,11 +293,55 @@
 
   .gameover-actions { margin-top: 1.5rem; }
 
+  /* ---------- Sparkline panel ---------- */
+  .sparkline-panel {
+    position: fixed;
+    right: clamp(12px, 2vw, 32px);
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    opacity: 0;
+    transition: opacity 0.4s;
+    pointer-events: none;
+  }
+  .sparkline-panel.visible { opacity: 1; }
+
+  .sparkline-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.6rem 0.8rem 0.4rem;
+    width: clamp(140px, 14vw, 200px);
+  }
+  .sparkline-card .spark-label {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.15rem;
+  }
+  .sparkline-card .spark-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 0.3rem;
+  }
+  .sparkline-card canvas {
+    display: block;
+    width: 100%;
+    height: 36px;
+    border-radius: 4px;
+  }
+
   /* ---------- Responsive ---------- */
   @media (max-width: 520px) {
     .arena { gap: 0.6rem; }
     .timer-bar-container { width: 90vw; }
     .stats { flex-wrap: wrap; justify-content: center; }
+    .sparkline-panel { display: none; }
   }
 </style>
 </head>
@@ -338,6 +382,20 @@
 <div class="actions">
   <button class="btn-primary" id="startBtn">Start Game</button>
   <button class="btn-secondary" id="settingsBtn">Settings</button>
+</div>
+
+<!-- Sparkline panel (right side) -->
+<div class="sparkline-panel" id="sparklinePanel">
+  <div class="sparkline-card">
+    <div class="spark-label">Events / min</div>
+    <div class="spark-value" id="sparkEpmValue">0</div>
+    <canvas id="sparkEpmCanvas" height="36"></canvas>
+  </div>
+  <div class="sparkline-card">
+    <div class="spark-label">Avg Reaction</div>
+    <div class="spark-value" id="sparkRtValue">-- ms</div>
+    <canvas id="sparkRtCanvas" height="36"></canvas>
+  </div>
 </div>
 
 <!-- Settings overlay -->
@@ -868,6 +926,7 @@ function onMiss() {
   totalScore += points;
   missCount++;
   consecutiveMisses++;
+  logEvent();
 
   streak = 0;
   sndWrong();
@@ -894,10 +953,12 @@ function onKeyResponse(pressedPos) {
   const isCorrect = pressedPos === activePos;
 
   let points;
+  logEvent();
   if (isCorrect) {
     points = config.basePoints * (1 - elapsed / lifetime);
     correctCount++;
     reactionTimes.push(elapsed);
+    logReaction(elapsed);
   } else {
     points = -config.penaltyPoints * (elapsed / lifetime);
     wrongCount++;
@@ -986,6 +1047,7 @@ function startGame() {
   gameoverOvl.classList.remove('open');
   resetUI();
   updateStats();
+  startSparklines();
   sndStartMelody(() => showToken());
 }
 
@@ -1028,6 +1090,7 @@ function endGame(reason) {
   document.getElementById('go-avgTime').textContent = avgTime === '-' ? '-' : avgTime + ' ms';
   document.getElementById('go-bestStreak').textContent = bestStreak;
 
+  stopSparklines();
   sndGameOver();
   gameoverOvl.classList.add('open');
 }
@@ -1059,6 +1122,138 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
+
+// ── Sparkline engine ─────────────────────────────────────────────
+const sparkPanel   = document.getElementById('sparklinePanel');
+const sparkEpmVal  = document.getElementById('sparkEpmValue');
+const sparkRtVal   = document.getElementById('sparkRtValue');
+const sparkEpmCvs  = document.getElementById('sparkEpmCanvas');
+const sparkRtCvs   = document.getElementById('sparkRtCanvas');
+
+const SPARK_WINDOW  = 60000;  // 60-second sliding window
+const SPARK_SAMPLES = 60;     // one sample per second of window
+const SPARK_INTERVAL = 1000;  // sample every 1s
+
+let eventLog     = [];  // timestamps of all events (correct/wrong/miss)
+let rtLog        = [];  // { t: timestamp, rt: ms } for correct hits
+let epmHistory   = [];  // sampled EPM values (up to SPARK_SAMPLES)
+let rtHistory    = [];  // sampled avg-RT values (up to SPARK_SAMPLES)
+let sparkTimer   = null;
+let gameStartedAt = 0;
+
+function logEvent() {
+  eventLog.push(performance.now());
+}
+
+function logReaction(rt) {
+  rtLog.push({ t: performance.now(), rt });
+}
+
+function sampleSparklines() {
+  const now = performance.now();
+  const cutoff = now - SPARK_WINDOW;
+
+  // Prune old entries
+  while (eventLog.length && eventLog[0] < cutoff) eventLog.shift();
+  while (rtLog.length && rtLog[0].t < cutoff) rtLog.shift();
+
+  // EPM: events in window, scaled to per-minute
+  const windowSecs = Math.min((now - gameStartedAt) / 1000, 60);
+  const epm = windowSecs > 0 ? Math.round(eventLog.length * (60 / windowSecs)) : 0;
+  epmHistory.push(epm);
+  if (epmHistory.length > SPARK_SAMPLES) epmHistory.shift();
+
+  // Avg RT in window
+  let avgRt = 0;
+  if (rtLog.length > 0) {
+    avgRt = Math.round(rtLog.reduce((s, e) => s + e.rt, 0) / rtLog.length);
+  }
+  rtHistory.push(avgRt);
+  if (rtHistory.length > SPARK_SAMPLES) rtHistory.shift();
+
+  // Update displayed values
+  sparkEpmVal.textContent = epm;
+  sparkRtVal.textContent = avgRt > 0 ? avgRt + ' ms' : '-- ms';
+
+  // Draw
+  drawSparkline(sparkEpmCvs, epmHistory, '#7c5cfc');
+  drawSparkline(sparkRtCvs, rtHistory, '#facc15');
+}
+
+function drawSparkline(canvas, data, color) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  if (data.length < 2) return;
+
+  const max = Math.max(...data, 1);
+  const pad = 2;
+  const plotH = h - pad * 2;
+  const step = w / (SPARK_SAMPLES - 1);
+
+  // Fill gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, color + '30');
+  grad.addColorStop(1, color + '00');
+
+  ctx.beginPath();
+  const startX = (SPARK_SAMPLES - data.length) * step;
+  ctx.moveTo(startX, h);
+  for (let i = 0; i < data.length; i++) {
+    const x = startX + i * step;
+    const y = pad + plotH * (1 - data[i] / max);
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(startX + (data.length - 1) * step, h);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Stroke line
+  ctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const x = startX + i * step;
+    const y = pad + plotH * (1 - data[i] / max);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // Dot on latest value
+  const lastX = startX + (data.length - 1) * step;
+  const lastY = pad + plotH * (1 - data[data.length - 1] / max);
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function startSparklines() {
+  eventLog    = [];
+  rtLog       = [];
+  epmHistory  = [];
+  rtHistory   = [];
+  gameStartedAt = performance.now();
+  sparkPanel.classList.add('visible');
+  sparkTimer = setInterval(sampleSparklines, SPARK_INTERVAL);
+}
+
+function stopSparklines() {
+  clearInterval(sparkTimer);
+  sparkTimer = null;
+  sparkPanel.classList.remove('visible');
+}
 
 // ── Init ─────────────────────────────────────────────────────────
 updateStats();
