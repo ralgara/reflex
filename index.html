@@ -391,6 +391,177 @@ let reactionTimes = [];    // only correct responses
 
 const KEY_MAP = { a: 0, s: 1, d: 2 };
 
+// ── Audio engine (Web Audio API) ─────────────────────────────────
+let audioCtx = null;
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+// Soft reverb tail via feedback delay
+function createReverb(ctx, input, decay, delayTime) {
+  const delay = ctx.createDelay();
+  delay.delayTime.value = delayTime;
+  const feedback = ctx.createGain();
+  feedback.gain.value = decay;
+  const wet = ctx.createGain();
+  wet.gain.value = 0.3;
+  input.connect(wet);
+  wet.connect(delay);
+  delay.connect(feedback);
+  feedback.connect(delay);
+  delay.connect(ctx.destination);
+}
+
+// Soft water-drop: token appears
+function sndAppear() {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+
+  // Primary drop tone - descending pitch
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(680, t);
+  osc.frequency.exponentialRampToValueAtTime(320, t + 0.18);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.12, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+
+  // Gentle filter for softness
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.value = 1200;
+  filt.Q.value = 1;
+
+  osc.connect(filt);
+  filt.connect(gain);
+  gain.connect(ctx.destination);
+  createReverb(ctx, gain, 0.25, 0.08);
+
+  osc.start(t);
+  osc.stop(t + 0.4);
+}
+
+// Muted bell chime: correct hit
+function sndCorrect() {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+
+  // Two harmonics for bell timbre
+  const freqs = [523, 784]; // C5 + G5 — gentle fifth
+  freqs.forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+
+    const gain = ctx.createGain();
+    const vol = i === 0 ? 0.10 : 0.06;
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
+
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 2000;
+    filt.Q.value = 0.5;
+
+    osc.connect(filt);
+    filt.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t + i * 0.04);
+    osc.stop(t + 0.9);
+  });
+
+  // Subtle shimmer via very quiet high partial
+  const shim = ctx.createOscillator();
+  shim.type = 'sine';
+  shim.frequency.value = 1568; // G6
+  const sg = ctx.createGain();
+  sg.gain.setValueAtTime(0.02, t);
+  sg.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+  shim.connect(sg);
+  sg.connect(ctx.destination);
+  createReverb(ctx, sg, 0.3, 0.12);
+  shim.start(t + 0.02);
+  shim.stop(t + 0.6);
+}
+
+// Deep, soft ripple: wrong or miss
+function sndWrong() {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(220, t);
+  osc.frequency.exponentialRampToValueAtTime(140, t + 0.4);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.10, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+
+  // Sub-oscillator for depth
+  const sub = ctx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.value = 110;
+  const subg = ctx.createGain();
+  subg.gain.setValueAtTime(0.06, t);
+  subg.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.value = 600;
+  filt.Q.value = 1.5;
+
+  osc.connect(filt);
+  sub.connect(filt);
+  filt.connect(gain);
+  filt.connect(subg);
+  gain.connect(ctx.destination);
+  subg.connect(ctx.destination);
+  createReverb(ctx, gain, 0.2, 0.1);
+
+  osc.start(t);
+  sub.start(t);
+  osc.stop(t + 0.55);
+  sub.stop(t + 0.5);
+}
+
+// Descending wind-chime sequence: game over
+function sndGameOver() {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+  const notes = [659, 587, 523, 440, 392]; // E5 D5 C5 A4 G4
+
+  notes.forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+
+    const gain = ctx.createGain();
+    const onset = t + i * 0.22;
+    gain.gain.setValueAtTime(0, onset);
+    gain.gain.linearRampToValueAtTime(0.08, onset + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, onset + 0.9);
+
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 1800;
+    filt.Q.value = 0.7;
+
+    osc.connect(filt);
+    filt.connect(gain);
+    gain.connect(ctx.destination);
+    createReverb(ctx, gain, 0.35, 0.14);
+
+    osc.start(onset);
+    osc.stop(onset + 1.0);
+  });
+}
+
 // ── Settings ─────────────────────────────────────────────────────
 function populateSettings() {
   for (const key of Object.keys(DEFAULTS)) {
@@ -474,6 +645,7 @@ function showToken() {
 
   tokenShownAt = performance.now();
   startTimerBar();
+  sndAppear();
 
   // Set expiry timer
   roundTimer = setTimeout(() => onMiss(), lifetime);
@@ -489,6 +661,7 @@ function onMiss() {
   totalScore += points;
   missCount++;
 
+  sndWrong();
   showFeedback('miss', points, elapsed);
   flashSlot(activePos, false);
   adjustLifetime(false);
@@ -515,6 +688,7 @@ function onKeyResponse(pressedPos) {
   }
 
   totalScore += points;
+  isCorrect ? sndCorrect() : sndWrong();
   showFeedback(isCorrect ? 'correct' : 'wrong', points, elapsed);
   flashSlot(isCorrect ? activePos : pressedPos, isCorrect);
   adjustLifetime(isCorrect);
@@ -613,6 +787,7 @@ function endGame() {
   document.getElementById('go-accuracy').textContent = accuracy + '%';
   document.getElementById('go-avgTime').textContent = avgTime === '-' ? '-' : avgTime + ' ms';
 
+  sndGameOver();
   gameoverOvl.classList.add('open');
 }
 
