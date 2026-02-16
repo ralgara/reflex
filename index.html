@@ -307,7 +307,7 @@
 
 <div class="stats">
   <span>Score: <span class="value" id="score">0</span></span>
-  <span>Round: <span class="value" id="round">0/20</span></span>
+  <span>Round: <span class="value" id="round">0</span></span>
   <span>Speed: <span class="value" id="lifetime">3000</span> ms</span>
   <span>Streak: <span class="value" id="streakDisplay">0</span></span>
 </div>
@@ -352,7 +352,7 @@
     <div class="setting-row"><label>Speedup Factor</label><input id="cfg-speedupFactor" type="number" step="0.01"></div>
     <div class="setting-row"><label>Slowdown Factor</label><input id="cfg-slowdownFactor" type="number" step="0.01"></div>
     <div class="setting-row"><label>Inter-round Pause (ms)</label><input id="cfg-interRoundMs" type="number"></div>
-    <div class="setting-row"><label>Rounds (0 = endless)</label><input id="cfg-numRounds" type="number"></div>
+    <div class="setting-row"><label>Max Consecutive Misses</label><input id="cfg-maxConsecutiveMisses" type="number"></div>
     <div class="settings-actions">
       <button class="btn-secondary" id="settingsResetBtn">Defaults</button>
       <button class="btn-primary" id="settingsSaveBtn">Save</button>
@@ -363,7 +363,8 @@
 <!-- Game-over overlay -->
 <div class="gameover-overlay" id="gameoverOverlay">
   <div class="gameover-panel">
-    <h2>Game Over</h2>
+    <h2 id="go-title">Game Over</h2>
+    <p id="go-reason" style="color: var(--text-dim); margin-bottom: 1rem; font-size: 0.95rem;"></p>
     <div class="gameover-stat"><span class="label">Final Score</span><span class="val" id="go-score"></span></div>
     <div class="gameover-stat"><span class="label">Correct</span><span class="val" id="go-correct"></span></div>
     <div class="gameover-stat"><span class="label">Wrong</span><span class="val" id="go-wrong"></span></div>
@@ -388,7 +389,7 @@ const DEFAULTS = {
   speedupFactor:   0.90,
   slowdownFactor:  1.20,
   interRoundMs:    500,
-  numRounds:       20,
+  maxConsecutiveMisses: 3,
 };
 
 let config = { ...DEFAULTS };
@@ -427,6 +428,7 @@ let missCount    = 0;
 let reactionTimes = [];    // only correct responses
 let streak        = 0;
 let bestStreak    = 0;
+let consecutiveMisses = 0;
 
 const KEY_MAP = { a: 0, s: 1, d: 2 };
 const STREAK_MILESTONES = [3, 5, 8, 12, 17, 23, 30]; // trigger celebrations
@@ -865,12 +867,19 @@ function onMiss() {
   const points = -config.penaltyPoints * (elapsed / lifetime);
   totalScore += points;
   missCount++;
+  consecutiveMisses++;
 
   streak = 0;
   sndWrong();
   showFeedback('miss', points, elapsed);
   flashSlot(activePos, false);
   adjustLifetime(false);
+
+  if (consecutiveMisses >= config.maxConsecutiveMisses) {
+    setTimeout(() => endGame('idle'), config.interRoundMs);
+    return;
+  }
+
   nextRound();
 }
 
@@ -879,6 +888,7 @@ function onKeyResponse(pressedPos) {
   responded = true;
   clearTimeout(roundTimer);
   stopTimerBar();
+  consecutiveMisses = 0;
 
   const elapsed = performance.now() - tokenShownAt;
   const isCorrect = pressedPos === activePos;
@@ -942,8 +952,7 @@ function flashSlot(pos, correct) {
 
 function updateStats() {
   scoreEl.textContent = Math.round(totalScore);
-  const total = config.numRounds > 0 ? config.numRounds : '\u221e';
-  roundEl.textContent = `${currentRound}/${total}`;
+  roundEl.textContent = currentRound;
   lifetimeEl.textContent = lifetime;
   document.getElementById('streakDisplay').textContent = streak;
 }
@@ -951,12 +960,6 @@ function updateStats() {
 function nextRound() {
   waitingNext = true;
   activePos = -1;
-
-  if (config.numRounds > 0 && currentRound >= config.numRounds) {
-    setTimeout(() => endGame(), config.interRoundMs);
-    return;
-  }
-
   setTimeout(() => showToken(), config.interRoundMs);
 }
 
@@ -972,6 +975,7 @@ function startGame() {
   reactionTimes = [];
   streak        = 0;
   bestStreak    = 0;
+  consecutiveMisses = 0;
   activePos     = -1;
   responded     = false;
   waitingNext   = false;
@@ -985,7 +989,7 @@ function startGame() {
   sndStartMelody(() => showToken());
 }
 
-function endGame() {
+function endGame(reason) {
   gameRunning = false;
   stopTimerBar();
   clearTimeout(roundTimer);
@@ -995,7 +999,21 @@ function endGame() {
   startBtn.disabled = false;
   settingsBtn.disabled = false;
 
-  // Populate game-over
+  // Set title and reason based on how the game ended
+  const titleEl = document.getElementById('go-title');
+  const reasonEl = document.getElementById('go-reason');
+  if (reason === 'idle') {
+    titleEl.textContent = 'Are you still there?';
+    reasonEl.textContent = `Game ended after ${config.maxConsecutiveMisses} consecutive missed turns.`;
+  } else if (reason === 'escape') {
+    titleEl.textContent = 'Game Paused';
+    reasonEl.textContent = 'You pressed Escape to end the session.';
+  } else {
+    titleEl.textContent = 'Game Over';
+    reasonEl.textContent = '';
+  }
+
+  // Populate game-over stats
   const total = correctCount + wrongCount + missCount;
   const accuracy = total > 0 ? ((correctCount / total) * 100).toFixed(1) : '0.0';
   const avgTime = reactionTimes.length > 0
@@ -1019,8 +1037,11 @@ startBtn.addEventListener('click', startGame);
 playAgainBtn.addEventListener('click', startGame);
 
 document.addEventListener('keydown', (e) => {
-  // Close overlays on Escape
   if (e.key === 'Escape') {
+    if (gameRunning) {
+      endGame('escape');
+      return;
+    }
     settingsOvl.classList.remove('open');
     if (gameoverOvl.classList.contains('open')) {
       gameoverOvl.classList.remove('open');
