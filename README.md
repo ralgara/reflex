@@ -182,6 +182,8 @@ Works in all modern browsers supporting:
 **License**: MIT
 **Built with**: Vanilla JavaScript, Web Audio API, HTML5 Canvas
 
+_This project was developed with Claude (Anthropic) as a coding assistant. Game design and direction by Rafael Algara._
+
 ## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
