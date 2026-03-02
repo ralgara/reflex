@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reflex</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f0f1a;
+    --surface: #1a1a2e;
+    --border: #2a2a4a;
+    --text: #e0e0e0;
+    --text-dim: #888;
+    --accent: #7c5cfc;
+    --correct: #22c55e;
+    --wrong: #ef4444;
+    --token: #facc15;
+  }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    overflow: hidden;
+  }
+
+  h1 {
+    font-size: clamp(2.4rem, 5vw, 4rem);
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+  }
+
+  /* ---------- Stats bar ---------- */
+  .stats {
+    display: flex;
+    gap: clamp(1.5rem, 3vw, 4rem);
+    font-size: clamp(1rem, 1.8vw, 1.5rem);
+    color: var(--text-dim);
+    margin-bottom: clamp(1.5rem, 3vh, 3rem);
+  }
+  .stats span { font-variant-numeric: tabular-nums; }
+  .stats .value { color: var(--text); font-weight: 600; }
+
+  /* ---------- Arena ---------- */
+  .arena {
+    display: flex;
+    gap: clamp(1.5rem, 3vw, 4rem);
+    margin-bottom: clamp(1.5rem, 3vh, 3rem);
+  }
+
+  .slot {
+    width: clamp(140px, 18vmin, 260px);
+    height: clamp(140px, 18vmin, 260px);
+    border: 3px solid var(--border);
+    border-radius: clamp(16px, 2vmin, 28px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    position: relative;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .slot .key-label {
+    position: absolute;
+    bottom: clamp(10px, 1.5vmin, 20px);
+    font-size: clamp(1.1rem, 2vmin, 2rem);
+    font-weight: 700;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+  }
+
+  .slot .token {
+    width: clamp(50px, 7vmin, 100px);
+    height: clamp(50px, 7vmin, 100px);
+    border-radius: 50%;
+    background: var(--token);
+    opacity: 0;
+    transform: scale(0.3);
+    transition: opacity 0.1s, transform 0.1s;
+    box-shadow: 0 0 30px rgba(250, 204, 21, 0.4);
+  }
+
+  .slot.active .token {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  /* Feedback flash */
+  .slot.flash-correct {
+    border-color: var(--correct);
+    box-shadow: 0 0 40px rgba(34, 197, 94, 0.4);
+  }
+  .slot.flash-wrong {
+    border-color: var(--wrong);
+    box-shadow: 0 0 40px rgba(239, 68, 68, 0.4);
+  }
+
+  /* ---------- Feedback ---------- */
+  .feedback {
+    font-size: clamp(1rem, 1.8vw, 1.6rem);
+    height: clamp(1.5rem, 3vh, 2.5rem);
+    margin-bottom: clamp(1rem, 2vh, 2rem);
+    font-weight: 600;
+    transition: opacity 0.2s;
+  }
+  .feedback.correct { color: var(--correct); }
+  .feedback.wrong   { color: var(--wrong); }
+  .feedback.miss    { color: var(--wrong); }
+  .feedback.streak  { color: var(--token); }
+
+  /* ---------- Streak banner ---------- */
+  .streak-banner {
+    position: fixed;
+    top: 15%;
+    left: 50%;
+    transform: translateX(-50%) scale(0);
+    font-size: clamp(1.4rem, 3vw, 2.8rem);
+    font-weight: 700;
+    color: var(--token);
+    text-shadow: 0 0 16px rgba(250, 204, 21, 0.5);
+    pointer-events: none;
+    opacity: 0;
+    z-index: 80;
+    white-space: nowrap;
+  }
+  .streak-banner.show {
+    animation: streakPop 1.2s ease-out forwards;
+  }
+  @keyframes streakPop {
+    0%   { opacity: 0; transform: translateX(-50%) scale(0.5); }
+    15%  { opacity: 1; transform: translateX(-50%) scale(1.15); }
+    30%  { transform: translateX(-50%) scale(1); }
+    80%  { opacity: 1; }
+    100% { opacity: 0; transform: translateX(-50%) scale(1) translateY(-30px); }
+  }
+
+  /* ---------- Particle canvas ---------- */
+  .particle-canvas {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 79;
+  }
+
+  /* ---------- Timer bar ---------- */
+  .timer-bar-container {
+    width: clamp(460px, 60vw, 900px);
+    height: clamp(6px, 0.8vmin, 10px);
+    background: var(--surface);
+    border-radius: 5px;
+    margin-bottom: clamp(1.5rem, 3vh, 3rem);
+    overflow: hidden;
+  }
+  .timer-bar {
+    height: 100%;
+    width: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transform-origin: left;
+    transition: background 0.2s;
+  }
+  .timer-bar.urgent { background: var(--wrong); }
+
+  /* ---------- Buttons ---------- */
+  .actions { display: flex; gap: 1.2rem; margin-bottom: 1rem; }
+
+  button {
+    padding: clamp(0.6rem, 1.2vmin, 1rem) clamp(1.6rem, 3vmin, 2.8rem);
+    font-size: clamp(1rem, 1.6vw, 1.4rem);
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+  button:active { transform: scale(0.96); }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: #6a4ae0; }
+
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { background: var(--border); }
+
+  /* ---------- Settings panel ---------- */
+  .settings-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .settings-overlay.open { display: flex; }
+
+  .settings-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    width: 400px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  .settings-panel h2 {
+    font-size: 1.3rem;
+    margin-bottom: 1.2rem;
+    color: var(--accent);
+  }
+
+  .setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.8rem;
+  }
+  .setting-row label {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  .setting-row input {
+    width: 90px;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    text-align: right;
+  }
+
+  .settings-actions {
+    display: flex;
+    gap: 0.8rem;
+    margin-top: 1.2rem;
+    justify-content: flex-end;
+  }
+
+  /* ---------- Game-over overlay ---------- */
+  .gameover-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    align-items: center;
+    justify-content: center;
+    z-index: 90;
+  }
+  .gameover-overlay.open { display: flex; }
+
+  .gameover-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem;
+    width: 380px;
+    text-align: center;
+  }
+  .gameover-panel h2 {
+    font-size: 1.6rem;
+    color: var(--accent);
+    margin-bottom: 1.2rem;
+  }
+  .gameover-stat {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.95rem;
+  }
+  .gameover-stat:last-of-type { border-bottom: none; }
+  .gameover-stat .label { color: var(--text-dim); }
+  .gameover-stat .val { font-weight: 700; }
+
+  .gameover-actions { margin-top: 1.5rem; }
+
+  /* ---------- Sparkline panel ---------- */
+  .sparkline-panel {
+    position: fixed;
+    right: clamp(12px, 2vw, 32px);
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    opacity: 0;
+    transition: opacity 0.4s;
+    pointer-events: none;
+  }
+  .sparkline-panel.visible { opacity: 1; }
+
+  .sparkline-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.6rem 0.8rem 0.4rem;
+    width: clamp(140px, 14vw, 200px);
+  }
+  .sparkline-card .spark-label {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.15rem;
+  }
+  .sparkline-card .spark-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 0.3rem;
+  }
+  .sparkline-card canvas {
+    display: block;
+    width: 100%;
+    height: 36px;
+    border-radius: 4px;
+  }
+
+  /* ---------- How-to-play info box ---------- */
+  .how-to-play {
+    font-size: clamp(0.85rem, 1.4vw, 1.05rem);
+    color: var(--text-dim);
+    text-align: center;
+    margin-bottom: clamp(1rem, 2vh, 1.5rem);
+    letter-spacing: 0.02em;
+  }
+  .how-to-play kbd {
+    display: inline-block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.45em;
+    font-family: inherit;
+    font-weight: 600;
+    color: var(--text);
+    font-size: 0.95em;
+  }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 520px) {
+    .arena { gap: 0.6rem; }
+    .timer-bar-container { width: 90vw; }
+    .stats { flex-wrap: wrap; justify-content: center; }
+    .sparkline-panel { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Reflex</h1>
+
+<p class="how-to-play">
+  Press <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> to match the token. Speed matters. Avoid mistakes. <kbd>Esc</kbd> ends the game.
+</p>
+
+<div class="stats">
+  <span>Score: <span class="value" id="score">0</span></span>
+  <span>Round: <span class="value" id="round">0</span></span>
+  <span>Speed: <span class="value" id="lifetime">3000</span> ms</span>
+  <span>Streak: <span class="value" id="streakDisplay">0</span></span>
+</div>
+
+<div class="arena">
+  <div class="slot" data-pos="0">
+    <div class="token"></div>
+    <span class="key-label">A</span>
+  </div>
+  <div class="slot" data-pos="1">
+    <div class="token"></div>
+    <span class="key-label">S</span>
+  </div>
+  <div class="slot" data-pos="2">
+    <div class="token"></div>
+    <span class="key-label">D</span>
+  </div>
+</div>
+
+<div class="timer-bar-container">
+  <div class="timer-bar" id="timerBar"></div>
+</div>
+
+<div class="feedback" id="feedback">&nbsp;</div>
+<div class="streak-banner" id="streakBanner"></div>
+<canvas class="particle-canvas" id="particleCanvas"></canvas>
+
+<div class="actions">
+  <button class="btn-primary" id="startBtn">Start Game</button>
+  <button class="btn-secondary" id="settingsBtn">Settings</button>
+</div>
+
+<!-- Sparkline panel (right side) -->
+<div class="sparkline-panel" id="sparklinePanel">
+  <div class="sparkline-card">
+    <div class="spark-label">Events / min</div>
+    <div class="spark-value" id="sparkEpmValue">0</div>
+    <canvas id="sparkEpmCanvas" height="36"></canvas>
+  </div>
+  <div class="sparkline-card">
+    <div class="spark-label">Avg Reaction</div>
+    <div class="spark-value" id="sparkRtValue">-- ms</div>
+    <canvas id="sparkRtCanvas" height="36"></canvas>
+  </div>
+</div>
+
+<!-- Settings overlay -->
+<div class="settings-overlay" id="settingsOverlay">
+  <div class="settings-panel">
+    <h2>Settings</h2>
+    <div class="setting-row"><label>Base Points</label><input id="cfg-basePoints" type="number"></div>
+    <div class="setting-row"><label>Penalty Points</label><input id="cfg-penaltyPoints" type="number"></div>
+    <div class="setting-row"><label>Initial Lifetime (ms)</label><input id="cfg-initialLifetime" type="number"></div>
+    <div class="setting-row"><label>Min Lifetime (ms)</label><input id="cfg-minLifetime" type="number"></div>
+    <div class="setting-row"><label>Max Lifetime (ms)</label><input id="cfg-maxLifetime" type="number"></div>
+    <div class="setting-row"><label>Speedup Factor</label><input id="cfg-speedupFactor" type="number" step="0.01"></div>
+    <div class="setting-row"><label>Slowdown Factor</label><input id="cfg-slowdownFactor" type="number" step="0.01"></div>
+    <div class="setting-row"><label>Inter-round Pause (ms)</label><input id="cfg-interRoundMs" type="number"></div>
+    <div class="setting-row"><label>Max Consecutive Misses</label><input id="cfg-maxConsecutiveMisses" type="number"></div>
+    <div class="settings-actions">
+      <button class="btn-secondary" id="settingsResetBtn">Defaults</button>
+      <button class="btn-primary" id="settingsSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Game-over overlay -->
+<div class="gameover-overlay" id="gameoverOverlay">
+  <div class="gameover-panel">
+    <h2 id="go-title">Game Over</h2>
+    <p id="go-reason" style="color: var(--text-dim); margin-bottom: 1rem; font-size: 0.95rem;"></p>
+    <div class="gameover-stat"><span class="label">Final Score</span><span class="val" id="go-score"></span></div>
+    <div class="gameover-stat"><span class="label">Correct</span><span class="val" id="go-correct"></span></div>
+    <div class="gameover-stat"><span class="label">Wrong</span><span class="val" id="go-wrong"></span></div>
+    <div class="gameover-stat"><span class="label">Missed</span><span class="val" id="go-missed"></span></div>
+    <div class="gameover-stat"><span class="label">Accuracy</span><span class="val" id="go-accuracy"></span></div>
+    <div class="gameover-stat"><span class="label">Avg Reaction</span><span class="val" id="go-avgTime"></span></div>
+    <div class="gameover-stat"><span class="label">Best Streak</span><span class="val" id="go-bestStreak"></span></div>
+    <div class="gameover-actions">
+      <button class="btn-primary" id="playAgainBtn">Play Again</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Configurable parameters ──────────────────────────────────────
+const DEFAULTS = {
+  basePoints:      1000,
+  penaltyPoints:   500,
+  initialLifetime: 3000,
+  minLifetime:     400,
+  maxLifetime:     5000,
+  speedupFactor:   0.90,
+  slowdownFactor:  1.20,
+  interRoundMs:    500,
+  maxConsecutiveMisses: 3,
+};
+
+let config = { ...DEFAULTS };
+
+// ── DOM refs ─────────────────────────────────────────────────────
+const slots        = document.querySelectorAll('.slot');
+const scoreEl      = document.getElementById('score');
+const roundEl      = document.getElementById('round');
+const lifetimeEl   = document.getElementById('lifetime');
+const feedbackEl   = document.getElementById('feedback');
+const timerBar     = document.getElementById('timerBar');
+const startBtn     = document.getElementById('startBtn');
+const settingsBtn  = document.getElementById('settingsBtn');
+const settingsOvl  = document.getElementById('settingsOverlay');
+const settingsSave = document.getElementById('settingsSaveBtn');
+const settingsReset= document.getElementById('settingsResetBtn');
+const gameoverOvl  = document.getElementById('gameoverOverlay');
+const playAgainBtn = document.getElementById('playAgainBtn');
+
+// ── Game state ───────────────────────────────────────────────────
+let gameRunning   = false;
+let currentRound  = 0;
+let totalScore    = 0;
+let lifetime      = config.initialLifetime;
+let activePos     = -1;   // 0, 1, 2 or -1
+let tokenShownAt  = 0;    // performance.now() timestamp
+let responded     = false;
+let roundTimer    = null;  // timeout for token expiry
+let animFrame     = null;  // requestAnimationFrame id
+let waitingNext   = false; // inter-round pause
+
+// Stats
+let correctCount = 0;
+let wrongCount   = 0;
+let missCount    = 0;
+let reactionTimes = [];    // only correct responses
+let streak        = 0;
+let bestStreak    = 0;
+let consecutiveMisses = 0;
+
+const KEY_MAP = { a: 0, s: 1, d: 2 };
+const STREAK_MILESTONES = [3, 5, 8, 12, 17, 23, 30]; // trigger celebrations
+
+// ── Audio engine (Web Audio API) ─────────────────────────────────
+let audioCtx = null;
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+// Soft reverb tail via feedback delay
+function createReverb(ctx, input, decay, delayTime) {
+  const delay = ctx.createDelay();
+  delay.delayTime.value = delayTime;
+  const feedback = ctx.createGain();
+  feedback.gain.value = decay;
+  const wet = ctx.createGain();
+  wet.gain.value = 0.3;
+  input.connect(wet);
+  wet.connect(delay);
+  delay.connect(feedback);
+  feedback.connect(delay);
+  delay.connect(ctx.destination);
+}
+
+// Soft water-drop: token appears
+function sndAppear() {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+
+  // Primary drop tone - descending pitch
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(680, t);
+  osc.frequency.exponentialRampToValueAtTime(320, t + 0.18);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.12, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+
+  // Gentle filter for softness
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.value = 1200;
+  filt.Q.value = 1;
+
+  osc.connect(filt);
+  filt.connect(gain);
+  gain.connect(ctx.destination);
+  createReverb(ctx, gain, 0.25, 0.08);
+
+  osc.start(t);
+  osc.stop(t + 0.4);
+}
+
+// Muted bell chime: correct hit
+function sndCorrect() {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+
+  // Two harmonics for bell timbre
+  const freqs = [523, 784]; // C5 + G5 — gentle fifth
+  freqs.forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+
+    const gain = ctx.createGain();
+    const vol = i === 0 ? 0.10 : 0.06;
+    gain.gain.setValueAtTime(vol, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
+
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 2000;
+    filt.Q.value = 0.5;
+
+    osc.connect(filt);
+    filt.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(t + i * 0.04);
+    osc.stop(t + 0.9);
+  });
+
+  // Subtle shimmer via very quiet high partial
+  const shim = ctx.createOscillator();
+  shim.type = 'sine';
+  shim.frequency.value = 1568; // G6
+  const sg = ctx.createGain();
+  sg.gain.setValueAtTime(0.02, t);
+  sg.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+  shim.connect(sg);
+  sg.connect(ctx.destination);
+  createReverb(ctx, sg, 0.3, 0.12);
+  shim.start(t + 0.02);
+  shim.stop(t + 0.6);
+}
+
+// Deep, soft ripple: wrong or miss
+function sndWrong() {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(220, t);
+  osc.frequency.exponentialRampToValueAtTime(140, t + 0.4);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.10, t);
+  gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+
+  // Sub-oscillator for depth
+  const sub = ctx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.value = 110;
+  const subg = ctx.createGain();
+  subg.gain.setValueAtTime(0.06, t);
+  subg.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'lowpass';
+  filt.frequency.value = 600;
+  filt.Q.value = 1.5;
+
+  osc.connect(filt);
+  sub.connect(filt);
+  filt.connect(gain);
+  filt.connect(subg);
+  gain.connect(ctx.destination);
+  subg.connect(ctx.destination);
+  createReverb(ctx, gain, 0.2, 0.1);
+
+  osc.start(t);
+  sub.start(t);
+  osc.stop(t + 0.55);
+  sub.stop(t + 0.5);
+}
+
+// Ascending pentatonic melody: game start
+function sndStartMelody(onDone) {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+  // A minor pentatonic ascending: A4 C5 D5 E5 G5 A5
+  const notes = [440, 523, 587, 659, 784, 880];
+  const spacing = 0.18;
+  const totalDuration = (notes.length - 1) * spacing + 0.7;
+
+  notes.forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+
+    const gain = ctx.createGain();
+    const onset = t + i * spacing;
+    // Each note slightly louder as melody rises
+    const vol = 0.05 + i * 0.012;
+    gain.gain.setValueAtTime(0, onset);
+    gain.gain.linearRampToValueAtTime(vol, onset + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, onset + 0.55);
+
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 1600 + i * 100;
+    filt.Q.value = 0.6;
+
+    osc.connect(filt);
+    filt.connect(gain);
+    gain.connect(ctx.destination);
+    createReverb(ctx, gain, 0.3, 0.1 + i * 0.01);
+
+    osc.start(onset);
+    osc.stop(onset + 0.6);
+  });
+
+  if (onDone) setTimeout(onDone, totalDuration * 1000);
+}
+
+// Descending wind-chime sequence: game over
+function sndGameOver() {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+  const notes = [659, 587, 523, 440, 392]; // E5 D5 C5 A4 G4
+
+  notes.forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+
+    const gain = ctx.createGain();
+    const onset = t + i * 0.22;
+    gain.gain.setValueAtTime(0, onset);
+    gain.gain.linearRampToValueAtTime(0.08, onset + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, onset + 0.9);
+
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 1800;
+    filt.Q.value = 0.7;
+
+    osc.connect(filt);
+    filt.connect(gain);
+    gain.connect(ctx.destination);
+    createReverb(ctx, gain, 0.35, 0.14);
+
+    osc.start(onset);
+    osc.stop(onset + 1.0);
+  });
+}
+
+// Streak milestone chime: intensity scales with streak length
+function sndStreakMilestone(streakLen) {
+  const ctx = ensureAudio();
+  const t = ctx.currentTime;
+  // More notes for longer streaks, ascending pentatonic
+  const scale = [523, 587, 659, 784, 880, 1047, 1175, 1319];
+  const tier = STREAK_MILESTONES.indexOf(streakLen);
+  const noteCount = Math.min(2 + tier, scale.length);
+  const vol = Math.min(0.06 + tier * 0.015, 0.14);
+
+  for (let i = 0; i < noteCount; i++) {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = scale[i];
+
+    const gain = ctx.createGain();
+    const onset = t + i * 0.1;
+    gain.gain.setValueAtTime(0, onset);
+    gain.gain.linearRampToValueAtTime(vol, onset + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, onset + 0.6 + tier * 0.08);
+
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 1800 + tier * 200;
+    filt.Q.value = 0.5;
+
+    osc.connect(filt);
+    filt.connect(gain);
+    gain.connect(ctx.destination);
+    createReverb(ctx, gain, 0.3 + tier * 0.03, 0.1);
+
+    osc.start(onset);
+    osc.stop(onset + 0.7 + tier * 0.1);
+  }
+}
+
+// ── Particle engine ──────────────────────────────────────────────
+const particleCanvas = document.getElementById('particleCanvas');
+const pCtx = particleCanvas.getContext('2d');
+let particles = [];
+let particleAF = null;
+
+function resizeParticleCanvas() {
+  particleCanvas.width = window.innerWidth;
+  particleCanvas.height = window.innerHeight;
+}
+resizeParticleCanvas();
+window.addEventListener('resize', resizeParticleCanvas);
+
+function spawnParticles(cx, cy, count, intensity) {
+  const hues = [45, 50, 55, 35, 60]; // gold/amber tones
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = (1.5 + Math.random() * 3) * intensity;
+    const size = 2 + Math.random() * 3 * intensity;
+    particles.push({
+      x: cx, y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 1.5 * intensity,
+      size,
+      life: 1,
+      decay: 0.008 + Math.random() * 0.012,
+      hue: hues[Math.floor(Math.random() * hues.length)],
+      sat: 80 + Math.random() * 20,
+      light: 60 + Math.random() * 25,
+    });
+  }
+  if (!particleAF) tickParticles();
+}
+
+function tickParticles() {
+  pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.06; // gentle gravity
+    p.life -= p.decay;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+
+    pCtx.globalAlpha = p.life;
+    pCtx.fillStyle = `hsl(${p.hue}, ${p.sat}%, ${p.light}%)`;
+    pCtx.beginPath();
+    pCtx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    pCtx.fill();
+  }
+  pCtx.globalAlpha = 1;
+  if (particles.length > 0) {
+    particleAF = requestAnimationFrame(tickParticles);
+  } else {
+    particleAF = null;
+  }
+}
+
+// Show streak banner + particles at the arena center
+function celebrateStreak(streakLen) {
+  const tier = STREAK_MILESTONES.indexOf(streakLen);
+  if (tier < 0) return;
+  const intensity = 1 + tier * 0.5;
+
+  // Banner
+  const banner = document.getElementById('streakBanner');
+  const labels = ['Nice!', 'Great!', 'Amazing!', 'On Fire!', 'Unstoppable!', 'Legendary!', 'Godlike!'];
+  banner.textContent = `${labels[Math.min(tier, labels.length - 1)]} ${streakLen}x streak  +${streakBonus(streakLen)}`;
+  banner.classList.remove('show');
+  void banner.offsetWidth; // reflow
+  banner.classList.add('show');
+  banner.style.fontSize = `${1.4 + tier * 0.15}rem`;
+
+  // Particles burst from arena center
+  const arena = document.querySelector('.arena');
+  const rect = arena.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const count = 12 + tier * 10;
+  spawnParticles(cx, cy, count, intensity);
+
+  // Sound
+  sndStreakMilestone(streakLen);
+}
+
+function streakBonus(len) {
+  // Quadratic scaling: longer streaks get disproportionately more
+  return Math.round(len * len * 10);
+}
+
+// ── Settings ─────────────────────────────────────────────────────
+function populateSettings() {
+  for (const key of Object.keys(DEFAULTS)) {
+    document.getElementById('cfg-' + key).value = config[key];
+  }
+}
+
+function readSettings() {
+  for (const key of Object.keys(DEFAULTS)) {
+    const raw = document.getElementById('cfg-' + key).value;
+    const val = parseFloat(raw);
+    if (!isNaN(val)) config[key] = val;
+  }
+}
+
+settingsBtn.addEventListener('click', () => {
+  if (gameRunning) return;
+  populateSettings();
+  settingsOvl.classList.add('open');
+});
+
+settingsSave.addEventListener('click', () => {
+  readSettings();
+  settingsOvl.classList.remove('open');
+});
+
+settingsReset.addEventListener('click', () => {
+  config = { ...DEFAULTS };
+  populateSettings();
+});
+
+settingsOvl.addEventListener('click', (e) => {
+  if (e.target === settingsOvl) settingsOvl.classList.remove('open');
+});
+
+// ── Timer bar animation ──────────────────────────────────────────
+function startTimerBar() {
+  const start = performance.now();
+  const duration = lifetime;
+
+  function tick() {
+    const elapsed = performance.now() - start;
+    const pct = Math.max(0, 1 - elapsed / duration);
+    timerBar.style.transform = `scaleX(${pct})`;
+    timerBar.classList.toggle('urgent', pct < 0.25);
+    if (pct > 0 && gameRunning) {
+      animFrame = requestAnimationFrame(tick);
+    }
+  }
+  animFrame = requestAnimationFrame(tick);
+}
+
+function stopTimerBar() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+  animFrame = null;
+}
+
+// ── Core game logic ──────────────────────────────────────────────
+function resetUI() {
+  slots.forEach(s => {
+    s.classList.remove('active', 'flash-correct', 'flash-wrong');
+  });
+  feedbackEl.textContent = '\u00a0';
+  feedbackEl.className = 'feedback';
+  timerBar.style.transform = 'scaleX(1)';
+  timerBar.classList.remove('urgent');
+}
+
+function showToken() {
+  if (!gameRunning) return;
+
+  currentRound++;
+  responded = false;
+  waitingNext = false;
+  activePos = Math.floor(Math.random() * 3);
+
+  // Update display
+  updateStats();
+  resetUI();
+  slots[activePos].classList.add('active');
+
+  tokenShownAt = performance.now();
+  startTimerBar();
+  sndAppear();
+
+  // Set expiry timer
+  roundTimer = setTimeout(() => onMiss(), lifetime);
+}
+
+function onMiss() {
+  if (responded || !gameRunning) return;
+  responded = true;
+  stopTimerBar();
+
+  const elapsed = lifetime; // full duration elapsed
+  const points = -config.penaltyPoints * (elapsed / lifetime);
+  totalScore += points;
+  missCount++;
+  consecutiveMisses++;
+  logEvent();
+
+  streak = 0;
+  sndWrong();
+  showFeedback('miss', points, elapsed);
+  flashSlot(activePos, false);
+  adjustLifetime(false);
+
+  if (consecutiveMisses >= config.maxConsecutiveMisses) {
+    setTimeout(() => endGame('idle'), config.interRoundMs);
+    return;
+  }
+
+  nextRound();
+}
+
+function onKeyResponse(pressedPos) {
+  if (!gameRunning || responded || waitingNext || activePos < 0) return;
+  responded = true;
+  clearTimeout(roundTimer);
+  stopTimerBar();
+  consecutiveMisses = 0;
+
+  const elapsed = performance.now() - tokenShownAt;
+  const isCorrect = pressedPos === activePos;
+
+  let points;
+  logEvent();
+  if (isCorrect) {
+    points = config.basePoints * (1 - elapsed / lifetime);
+    correctCount++;
+    reactionTimes.push(elapsed);
+    logReaction(elapsed);
+  } else {
+    points = -config.penaltyPoints * (elapsed / lifetime);
+    wrongCount++;
+  }
+
+  if (isCorrect) {
+    streak++;
+    if (streak > bestStreak) bestStreak = streak;
+    // Streak milestone bonus
+    if (STREAK_MILESTONES.includes(streak)) {
+      const bonus = streakBonus(streak);
+      points += bonus;
+      celebrateStreak(streak);
+    }
+  } else {
+    streak = 0;
+  }
+
+  totalScore += points;
+  isCorrect ? sndCorrect() : sndWrong();
+  showFeedback(isCorrect ? 'correct' : 'wrong', points, elapsed);
+  flashSlot(isCorrect ? activePos : pressedPos, isCorrect);
+  adjustLifetime(isCorrect);
+  nextRound();
+}
+
+function adjustLifetime(correct) {
+  if (correct) {
+    lifetime = Math.max(config.minLifetime, lifetime * config.speedupFactor);
+  } else {
+    lifetime = Math.min(config.maxLifetime, lifetime * config.slowdownFactor);
+  }
+  lifetime = Math.round(lifetime);
+}
+
+function showFeedback(type, points, elapsed) {
+  const sign = points >= 0 ? '+' : '';
+  const label = type === 'correct' ? 'Correct!'
+              : type === 'wrong'   ? 'Wrong!'
+              : 'Missed!';
+  feedbackEl.textContent = `${label}  ${sign}${Math.round(points)} pts  (${Math.round(elapsed)} ms)`;
+  feedbackEl.className = `feedback ${type}`;
+  updateStats();
+}
+
+function flashSlot(pos, correct) {
+  const cls = correct ? 'flash-correct' : 'flash-wrong';
+  slots[pos].classList.add(cls);
+  slots.forEach(s => s.classList.remove('active'));
+  setTimeout(() => slots[pos].classList.remove(cls), config.interRoundMs);
+}
+
+function updateStats() {
+  scoreEl.textContent = Math.round(totalScore);
+  roundEl.textContent = currentRound;
+  lifetimeEl.textContent = lifetime;
+  document.getElementById('streakDisplay').textContent = streak;
+}
+
+function nextRound() {
+  waitingNext = true;
+  activePos = -1;
+  setTimeout(() => showToken(), config.interRoundMs);
+}
+
+// ── Start / End ──────────────────────────────────────────────────
+function startGame() {
+  gameRunning   = true;
+  currentRound  = 0;
+  totalScore    = 0;
+  lifetime      = config.initialLifetime;
+  correctCount  = 0;
+  wrongCount    = 0;
+  missCount     = 0;
+  reactionTimes = [];
+  streak        = 0;
+  bestStreak    = 0;
+  consecutiveMisses = 0;
+  activePos     = -1;
+  responded     = false;
+  waitingNext   = false;
+
+  startBtn.textContent = 'Running...';
+  startBtn.disabled = true;
+  settingsBtn.disabled = true;
+  gameoverOvl.classList.remove('open');
+  resetUI();
+  updateStats();
+  startSparklines();
+  sndStartMelody(() => showToken());
+}
+
+function endGame(reason) {
+  gameRunning = false;
+  stopTimerBar();
+  clearTimeout(roundTimer);
+  resetUI();
+
+  startBtn.textContent = 'Start Game';
+  startBtn.disabled = false;
+  settingsBtn.disabled = false;
+
+  // Set title and reason based on how the game ended
+  const titleEl = document.getElementById('go-title');
+  const reasonEl = document.getElementById('go-reason');
+  if (reason === 'idle') {
+    titleEl.textContent = 'Are you still there?';
+    reasonEl.textContent = `Game ended after ${config.maxConsecutiveMisses} consecutive missed turns.`;
+  } else if (reason === 'escape') {
+    titleEl.textContent = 'Game Paused';
+    reasonEl.textContent = 'You pressed Escape to end the session.';
+  } else {
+    titleEl.textContent = 'Game Over';
+    reasonEl.textContent = '';
+  }
+
+  // Populate game-over stats
+  const total = correctCount + wrongCount + missCount;
+  const accuracy = total > 0 ? ((correctCount / total) * 100).toFixed(1) : '0.0';
+  const avgTime = reactionTimes.length > 0
+    ? Math.round(reactionTimes.reduce((a, b) => a + b, 0) / reactionTimes.length)
+    : '-';
+
+  document.getElementById('go-score').textContent = Math.round(totalScore);
+  document.getElementById('go-correct').textContent = correctCount;
+  document.getElementById('go-wrong').textContent = wrongCount;
+  document.getElementById('go-missed').textContent = missCount;
+  document.getElementById('go-accuracy').textContent = accuracy + '%';
+  document.getElementById('go-avgTime').textContent = avgTime === '-' ? '-' : avgTime + ' ms';
+  document.getElementById('go-bestStreak').textContent = bestStreak;
+
+  stopSparklines();
+  sndGameOver();
+  gameoverOvl.classList.add('open');
+}
+
+// ── Event listeners ──────────────────────────────────────────────
+startBtn.addEventListener('click', startGame);
+playAgainBtn.addEventListener('click', startGame);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (gameRunning) {
+      endGame('escape');
+      return;
+    }
+    settingsOvl.classList.remove('open');
+    if (gameoverOvl.classList.contains('open')) {
+      gameoverOvl.classList.remove('open');
+    }
+    return;
+  }
+
+  const pos = KEY_MAP[e.key.toLowerCase()];
+  if (pos !== undefined) {
+    if (!gameRunning) {
+      // Auto-start on first key press if not running
+      startGame();
+    } else {
+      onKeyResponse(pos);
+    }
+  }
+});
+
+// ── Sparkline engine ─────────────────────────────────────────────
+const sparkPanel   = document.getElementById('sparklinePanel');
+const sparkEpmVal  = document.getElementById('sparkEpmValue');
+const sparkRtVal   = document.getElementById('sparkRtValue');
+const sparkEpmCvs  = document.getElementById('sparkEpmCanvas');
+const sparkRtCvs   = document.getElementById('sparkRtCanvas');
+
+const SPARK_WINDOW  = 60000;  // 60-second sliding window
+const SPARK_SAMPLES = 60;     // one sample per second of window
+const SPARK_INTERVAL = 1000;  // sample every 1s
+
+let eventLog     = [];  // timestamps of all events (correct/wrong/miss)
+let rtLog        = [];  // { t: timestamp, rt: ms } for correct hits
+let epmHistory   = [];  // sampled EPM values (up to SPARK_SAMPLES)
+let rtHistory    = [];  // sampled avg-RT values (up to SPARK_SAMPLES)
+let sparkTimer   = null;
+let gameStartedAt = 0;
+
+function logEvent() {
+  eventLog.push(performance.now());
+}
+
+function logReaction(rt) {
+  rtLog.push({ t: performance.now(), rt });
+}
+
+function sampleSparklines() {
+  const now = performance.now();
+  const cutoff = now - SPARK_WINDOW;
+
+  // Prune old entries
+  while (eventLog.length && eventLog[0] < cutoff) eventLog.shift();
+  while (rtLog.length && rtLog[0].t < cutoff) rtLog.shift();
+
+  // EPM: events in window, scaled to per-minute
+  const windowSecs = Math.min((now - gameStartedAt) / 1000, 60);
+  const epm = windowSecs > 0 ? Math.round(eventLog.length * (60 / windowSecs)) : 0;
+  epmHistory.push(epm);
+  if (epmHistory.length > SPARK_SAMPLES) epmHistory.shift();
+
+  // Avg RT in window
+  let avgRt = 0;
+  if (rtLog.length > 0) {
+    avgRt = Math.round(rtLog.reduce((s, e) => s + e.rt, 0) / rtLog.length);
+  }
+  rtHistory.push(avgRt);
+  if (rtHistory.length > SPARK_SAMPLES) rtHistory.shift();
+
+  // Update displayed values
+  sparkEpmVal.textContent = epm;
+  sparkRtVal.textContent = avgRt > 0 ? avgRt + ' ms' : '-- ms';
+
+  // Draw
+  drawSparkline(sparkEpmCvs, epmHistory, '#7c5cfc');
+  drawSparkline(sparkRtCvs, rtHistory, '#facc15');
+}
+
+function drawSparkline(canvas, data, color) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  if (data.length < 2) return;
+
+  const max = Math.max(...data, 1);
+  const pad = 2;
+  const plotH = h - pad * 2;
+  const step = w / (SPARK_SAMPLES - 1);
+
+  // Fill gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, color + '30');
+  grad.addColorStop(1, color + '00');
+
+  ctx.beginPath();
+  const startX = (SPARK_SAMPLES - data.length) * step;
+  ctx.moveTo(startX, h);
+  for (let i = 0; i < data.length; i++) {
+    const x = startX + i * step;
+    const y = pad + plotH * (1 - data[i] / max);
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(startX + (data.length - 1) * step, h);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Stroke line
+  ctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const x = startX + i * step;
+    const y = pad + plotH * (1 - data[i] / max);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // Dot on latest value
+  const lastX = startX + (data.length - 1) * step;
+  const lastY = pad + plotH * (1 - data[data.length - 1] / max);
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function startSparklines() {
+  eventLog    = [];
+  rtLog       = [];
+  epmHistory  = [];
+  rtHistory   = [];
+  gameStartedAt = performance.now();
+  sparkPanel.classList.add('visible');
+  sparkTimer = setInterval(sampleSparklines, SPARK_INTERVAL);
+}
+
+function stopSparklines() {
+  clearInterval(sparkTimer);
+  sparkTimer = null;
+  sparkPanel.classList.remove('visible');
+}
+
+// ── Init ─────────────────────────────────────────────────────────
+updateStats();
+</script>
+</body>
+</html>
